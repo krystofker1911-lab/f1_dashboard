@@ -7,8 +7,8 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. Nastavení aplikace ---
 st.set_page_config(page_title="F1 Pit Wall Timing", layout="wide", initial_sidebar_state="collapsed")
 
-# Obnovování každou 1 sekundu (1000 ms)
-st_autorefresh(interval=1000, key="f1_live_refresh")
+# Obnovování každé 3 sekundy (3000 ms)
+st_autorefresh(interval=3000, key="f1_live_refresh")
 
 # Vlastní CSS styly pro F1 Pit Wall
 st.markdown("""
