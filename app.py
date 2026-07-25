@@ -48,8 +48,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Bezpečné stažení JSON dat z API s cache na 2 sekundy
-@st.cache_data(ttl=2)
+# Bezpečné stažení JSON dat z API
+@st.cache_data(ttl=3)
 def safe_get_json(url):
     try:
         res = requests.get(url, timeout=5)
@@ -60,7 +60,7 @@ def safe_get_json(url):
     except Exception:
         return []
 
-# --- 2. Kontrola kalendáře a relace ---
+# --- 2. Inteligentní výběr relace s fallbackem ---
 now_utc = datetime.now(timezone.utc)
 year = now_utc.year
 all_sessions = safe_get_json(f"https://api.openf1.org/v1/sessions?year={year}")
@@ -90,26 +90,35 @@ if all_sessions:
         except Exception:
             continue
 
+# Získání dat kol
+laps_raw = []
+session_key = "latest"
+session_title = "🏎️ F1 PIT WALL DASHBOARD"
+
 if active_session:
     session_key = str(active_session.get("session_key"))
     session_title = f"🔴 LIVE PIT WALL — {active_session.get('location', '')} ({active_session.get('session_name', '')})"
-else:
-    latest_info = safe_get_json("https://api.openf1.org/v1/sessions?session_key=latest")
-    if latest_info and len(latest_info) > 0:
-        session_key = str(latest_info[-1].get("session_key"))
-        s_loc = latest_info[-1].get('location', '')
-        s_name = latest_info[-1].get('session_name', '')
-        session_title = f"🏎️ F1 PIT WALL — {s_loc} ({s_name})"
-    else:
-        session_key = "9515"
-        session_title = "🏎️ F1 PIT WALL DASHBOARD"
+    laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={session_key}")
+
+# Pokud neběží živá relace nebo v ní ještě nejsou kola, najdeme poslední relaci s platnými daty
+if not laps_raw:
+    if all_sessions:
+        for s in reversed(all_sessions):
+            sk = str(s.get("session_key"))
+            test_laps = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={sk}")
+            if test_laps and len(test_laps) > 0:
+                session_key = sk
+                s_loc = s.get('location', 'F1 GP')
+                s_name = s.get('session_name', 'Session')
+                session_title = f"🏎️ F1 PIT WALL — {s_loc} ({s_name})"
+                laps_raw = test_laps
+                break
 
 st.markdown(f'<div class="session-header">{session_title}</div>', unsafe_allow_html=True)
 
-# --- 3. Načtení dat z OpenF1 API ---
+# --- 3. Načtení ostatních dat pro daný session_key ---
 drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={session_key}")
 status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={session_key}")
-laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={session_key}")
 stints_raw = safe_get_json(f"https://api.openf1.org/v1/stints?session_key={session_key}")
 pits_raw = safe_get_json(f"https://api.openf1.org/v1/pit?session_key={session_key}")
 radios_raw = safe_get_json(f"https://api.openf1.org/v1/team_radio?session_key={session_key}")
@@ -277,13 +286,11 @@ with tab_timing:
 with tab_cockpit:
     st.subheader("🏎️ Živá Telemetrie z Kokpitu Vozu")
     
-    # Výběr jezdce
     driver_options = {f"{acronym} ({team_map.get(num, '-')})": num for num, acronym in driver_map.items()}
     if driver_options:
         selected_label = st.selectbox("Vyber jezdce pro sledování kokpitu:", list(driver_options.keys()))
         selected_driver_num = driver_options[selected_label]
         
-        # Načtení telemetrických dat vozidla z OpenF1
         car_data_raw = safe_get_json(f"https://api.openf1.org/v1/car_data?session_key={session_key}&driver_number={selected_driver_num}")
         
         if car_data_raw and len(car_data_raw) > 0:
@@ -296,7 +303,6 @@ with tab_cockpit:
             brake = latest_telemetry.get('brake', 0)
             drs_code = latest_telemetry.get('drs', 0)
             
-            # Vyhodnocení DRS
             is_drs_open = drs_code >= 10 or drs_code in [8, 10, 12, 14]
             drs_html = '<div class="drs-open">🟢 DRS OTEVŘENO (OPEN)</div>' if is_drs_open else '<div class="drs-closed">🔴 DRS ZAVŘENO (CLOSED)</div>'
             
@@ -312,7 +318,6 @@ with tab_cockpit:
             
             st.divider()
             
-            # Ukazatel Pedálů
             st.write("**📱 Pedály (Plyn / Brzda):**")
             col_th, col_br = st.columns(2)
             with col_th:
