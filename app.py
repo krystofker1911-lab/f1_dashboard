@@ -6,8 +6,8 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. Nastavení aplikace ---
 st.set_page_config(page_title="F1 Pro Pit Wall & Cockpit", layout="wide", initial_sidebar_state="expanded")
 
-# Živé obnovování každé 3 sekundy
-st_autorefresh(interval=3000, key="f1_live_refresh")
+# Obnovování každých 5 sekund
+st_autorefresh(interval=5000, key="f1_live_refresh")
 
 # Vlastní CSS styly
 st.markdown("""
@@ -49,11 +49,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Bezpečné stažení JSON dat z API
-@st.cache_data(ttl=2)
+@st.cache_data(ttl=3)
 def safe_get_json(url):
     try:
         headers = {'User-Agent': 'F1PitWallApp/1.0'}
-        res = requests.get(url, headers=headers, timeout=4)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code == 200:
             data = res.json()
             if isinstance(data, list):
@@ -62,12 +62,11 @@ def safe_get_json(url):
     except Exception:
         return []
 
-# --- 2. Načtení seznamu všech relací ---
+# --- 2. Načtení relací ---
 sessions_raw = safe_get_json("https://api.openf1.org/v1/sessions")
 
 session_dict = {}
 if sessions_raw:
-    # Seřadíme od nejnovější relace
     for s in reversed(sessions_raw):
         sk = str(s.get("session_key"))
         loc = s.get('location', 'F1 GP')
@@ -76,41 +75,43 @@ if sessions_raw:
         label = f"{loc} — {s_name} ({year_str})"
         session_dict[label] = sk
 
-# Postranní panel pro výběr relace
-st.sidebar.title("🏎️ Výběr Relace")
+st.sidebar.title("🏎️ F1 Pit Wall")
 if session_dict:
-    selected_label = st.sidebar.selectbox("Vyber aktivní nebo starší relaci:", list(session_dict.keys()), index=0)
-    selected_session_key = session_dict[selected_label]
+    selected_label = st.sidebar.selectbox("Vyber relaci pro zobrazení:", list(session_dict.keys()), index=0)
+    target_key = session_dict[selected_label]
 else:
-    selected_session_key = "latest"
-    selected_label = "🔴 LIVE SESSION"
+    target_key = "latest"
+    selected_label = "Živý přenos"
+
+# --- 3. Inteligentní hledání dat (Fallback na poslední funkční relaci) ---
+drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={target_key}")
+laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={target_key}")
+
+# Pokud vybraná relace nemá žádné jezdce ani kola, projdeme historii a najdeme nejnovější funkční
+if (not drivers_raw or not laps_raw) and sessions_raw:
+    for s in reversed(sessions_raw):
+        test_key = str(s.get("session_key"))
+        test_drivers = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={test_key}")
+        test_laps = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={test_key}")
+        
+        if test_drivers and test_laps:
+            target_key = test_key
+            drivers_raw = test_drivers
+            laps_raw = test_laps
+            loc = s.get('location', 'F1 GP')
+            s_name = s.get('session_name', 'Session')
+            selected_label = f"{loc} — {s_name} (Archiv/Živě)"
+            st.sidebar.warning("⚠️ Vybraná relace neměla data. Zobrazuji poslední dostupný přenos.")
+            break
 
 st.markdown(f'<div class="session-header">🔴 PIT WALL — {selected_label}</div>', unsafe_allow_html=True)
 
-# --- 3. Načtení dat z trati pro zvolenou relaci ---
-drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={selected_session_key}")
-laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={selected_session_key}")
-status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={selected_session_key}")
-stints_raw = safe_get_json(f"https://api.openf1.org/v1/stints?session_key={selected_session_key}")
-pits_raw = safe_get_json(f"https://api.openf1.org/v1/pit?session_key={selected_session_key}")
-radios_raw = safe_get_json(f"https://api.openf1.org/v1/team_radio?session_key={selected_session_key}")
-location_raw = safe_get_json(f"https://api.openf1.org/v1/location?session_key={selected_session_key}")
-
-# Fallback vyhledávání: Pokud vybraná relace nemá žádné jezdce, zkusíme najít první relaci, která data má
-if not drivers_raw and sessions_raw:
-    for s in reversed(sessions_raw):
-        sk = str(s.get("session_key"))
-        test_d = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={sk}")
-        if test_d:
-            selected_session_key = sk
-            drivers_raw = test_d
-            laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={sk}")
-            status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={sk}")
-            stints_raw = safe_get_json(f"https://api.openf1.org/v1/stints?session_key={sk}")
-            pits_raw = safe_get_json(f"https://api.openf1.org/v1/pit?session_key={sk}")
-            radios_raw = safe_get_json(f"https://api.openf1.org/v1/team_radio?session_key={sk}")
-            location_raw = safe_get_json(f"https://api.openf1.org/v1/location?session_key={sk}")
-            break
+# Načtení zbytku telemetrie pro nalezený session_key
+status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={target_key}")
+stints_raw = safe_get_json(f"https://api.openf1.org/v1/stints?session_key={target_key}")
+pits_raw = safe_get_json(f"https://api.openf1.org/v1/pit?session_key={target_key}")
+radios_raw = safe_get_json(f"https://api.openf1.org/v1/team_radio?session_key={target_key}")
+location_raw = safe_get_json(f"https://api.openf1.org/v1/location?session_key={target_key}")
 
 driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 team_map = {d.get('driver_number'): d.get('team_name', '-') for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
@@ -175,11 +176,10 @@ def fmt_time(seconds):
 
 with tab_timing:
     if not driver_map:
-        st.info("⌛ Čekám na odpověď od OpenF1 API...")
+        st.error("❌ Nepodařilo se připojit k OpenF1 API serveru. Zkuste obnovit stránku za chvíli.")
     else:
         df_laps = pd.DataFrame(laps_raw) if laps_raw else pd.DataFrame()
         
-        # Nejlepší časy sektorů
         best_s1 = df_laps['duration_sector_1'].min() if not df_laps.empty and 'duration_sector_1' in df_laps else None
         best_s2 = df_laps['duration_sector_2'].min() if not df_laps.empty and 'duration_sector_2' in df_laps else None
         best_s3 = df_laps['duration_sector_3'].min() if not df_laps.empty and 'duration_sector_3' in df_laps else None
@@ -261,7 +261,7 @@ with tab_cockpit:
         selected_label_cockpit = st.selectbox("Vyber jezdce pro sledování kokpitu:", list(driver_options.keys()))
         selected_driver_num = driver_options[selected_label_cockpit]
         
-        car_data_raw = safe_get_json(f"https://api.openf1.org/v1/car_data?session_key={selected_session_key}&driver_number={selected_driver_num}")
+        car_data_raw = safe_get_json(f"https://api.openf1.org/v1/car_data?session_key={target_key}&driver_number={selected_driver_num}")
         
         if car_data_raw and len(car_data_raw) > 0:
             latest_telemetry = car_data_raw[-1]
@@ -295,12 +295,12 @@ with tab_cockpit:
                 st.write(f"🔴 Brzda: **{brake}%**")
                 st.progress(min(100, max(0, int(brake))))
         else:
-            st.info("⌛ Čekám na telemetrický signál z vozu...")
+            st.info("⌛ Telemetrická data pro vybraného jezdce nejsou k dispozici.")
 
 with tab_map:
     st.subheader("🗺️ Živá mapa okruhu a pozice vozů")
     if not location_raw:
-        st.info("⌛ Čekám na GPS telemetrická data vozů z trati...")
+        st.info("⌛ GPS telemetrie vozů není pro tuto relaci k dispozici.")
     else:
         df_loc = pd.DataFrame(location_raw)
         if not df_loc.empty and 'x' in df_loc.columns and 'y' in df_loc.columns and 'driver_number' in df_loc.columns:
