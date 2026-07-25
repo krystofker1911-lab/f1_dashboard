@@ -3,57 +3,28 @@ import requests
 import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. Nastavení aplikace ---
-st.set_page_config(page_title="F1 Pro Pit Wall & Cockpit", layout="wide", initial_sidebar_state="expanded")
+# --- Nastavení aplikace ---
+st.set_page_config(page_title="F1 Live Timing", layout="wide")
 
-# Obnovování každých 5 sekund
-st_autorefresh(interval=5000, key="f1_live_refresh")
+# Obnovování každé 3 sekundy
+st_autorefresh(interval=3000, key="f1_timing_refresh")
 
-# Vlastní CSS styly
+# Čistý tmavý CSS styl
 st.markdown("""
     <style>
         .stApp { background-color: #0E0E12; color: #FFFFFF; }
-        .session-header {
-            font-size: 24px; font-weight: bold; text-align: center;
-            color: #E10600; margin-bottom: 5px; letter-spacing: 1px;
+        .title { 
+            font-size: 28px; font-weight: bold; text-align: center; 
+            color: #E10600; margin-bottom: 20px; letter-spacing: 1px; 
         }
-        .track-status-box {
-            padding: 12px; border-radius: 8px; text-align: center;
-            font-size: 24px; font-weight: bold; margin-bottom: 12px;
-            text-transform: uppercase; letter-spacing: 2px;
-        }
-        .status-green { background-color: #00D26A; color: #000; }
-        .status-yellow {
-            animation: yellow-flash 0.6s infinite;
-            border: 3px solid #FFD700;
-        }
-        @keyframes yellow-flash {
-            0% { background-color: #FFCC00; color: #000; box-shadow: 0 0 25px #FFCC00; }
-            50% { background-color: #1A1500; color: #FFCC00; box-shadow: 0 0 5px #000; }
-            100% { background-color: #FFCC00; color: #000; box-shadow: 0 0 25px #FFCC00; }
-        }
-        .status-sc { background-color: #FF8800; color: #FFF; animation: blink 1s infinite; }
-        .status-red { background-color: #FF1801; color: #FFF; animation: blink 0.5s infinite; }
-        .status-vsc { background-color: #E67E22; color: #FFF; }
-        
-        .telemetry-card {
-            background-color: #16161E; border-radius: 8px; padding: 15px;
-            text-align: center; border: 1px solid #2A2A36; margin-bottom: 10px;
-        }
-        .telemetry-val { font-size: 32px; font-weight: bold; color: #00E5FF; }
-        .drs-open { background-color: #00D26A; color: #000; padding: 6px; border-radius: 6px; font-weight: bold; }
-        .drs-closed { background-color: #FF1801; color: #FFF; padding: 6px; border-radius: 6px; font-weight: bold; }
-        
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 """, unsafe_allow_html=True)
 
-# Bezpečné stažení JSON dat z API
-@st.cache_data(ttl=3)
+# Bezpečné stažení JSON dat z OpenF1 API
+@st.cache_data(ttl=2)
 def safe_get_json(url):
     try:
-        headers = {'User-Agent': 'F1PitWallApp/1.0'}
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers={'User-Agent': 'F1LiveTiming/1.0'}, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if isinstance(data, list):
@@ -62,107 +33,28 @@ def safe_get_json(url):
     except Exception:
         return []
 
-# --- 2. Načtení relací ---
+# --- Načtení živé nebo nejnovější dostupné relace ---
 sessions_raw = safe_get_json("https://api.openf1.org/v1/sessions")
+session_name = "F1 LIVE TIMING"
 
-session_dict = {}
-if sessions_raw:
-    for s in reversed(sessions_raw):
-        sk = str(s.get("session_key"))
-        loc = s.get('location', 'F1 GP')
-        s_name = s.get('session_name', 'Session')
-        year_str = s.get('year', '')
-        label = f"{loc} — {s_name} ({year_str})"
-        session_dict[label] = sk
+drivers_raw = safe_get_json("https://api.openf1.org/v1/drivers?session_key=latest")
+laps_raw = safe_get_json("https://api.openf1.org/v1/laps?session_key=latest")
 
-st.sidebar.title("🏎️ F1 Pit Wall")
-if session_dict:
-    selected_label = st.sidebar.selectbox("Vyber relaci pro zobrazení:", list(session_dict.keys()), index=0)
-    target_key = session_dict[selected_label]
-else:
-    target_key = "latest"
-    selected_label = "Živý přenos"
-
-# --- 3. Inteligentní hledání dat (Fallback na poslední funkční relaci) ---
-drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={target_key}")
-laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={target_key}")
-
-# Pokud vybraná relace nemá žádné jezdce ani kola, projdeme historii a najdeme nejnovější funkční
+# Fallback: Pokud 'latest' nemá data, najdeme v historii nejnovější relaci, která data má
 if (not drivers_raw or not laps_raw) and sessions_raw:
     for s in reversed(sessions_raw):
-        test_key = str(s.get("session_key"))
-        test_drivers = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={test_key}")
-        test_laps = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={test_key}")
-        
-        if test_drivers and test_laps:
-            target_key = test_key
-            drivers_raw = test_drivers
-            laps_raw = test_laps
-            loc = s.get('location', 'F1 GP')
-            s_name = s.get('session_name', 'Session')
-            selected_label = f"{loc} — {s_name} (Archiv/Živě)"
-            st.sidebar.warning("⚠️ Vybraná relace neměla data. Zobrazuji poslední dostupný přenos.")
+        sk = str(s.get("session_key"))
+        d_test = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={sk}")
+        l_test = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={sk}")
+        if d_test and l_test:
+            drivers_raw = d_test
+            laps_raw = l_test
+            session_name = f"{s.get('location', 'F1 GP')} — {s.get('session_name', 'Session')}"
             break
 
-st.markdown(f'<div class="session-header">🔴 PIT WALL — {selected_label}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="title">⏱️ {session_name}</div>', unsafe_allow_html=True)
 
-# Načtení zbytku telemetrie pro nalezený session_key
-status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={target_key}")
-stints_raw = safe_get_json(f"https://api.openf1.org/v1/stints?session_key={target_key}")
-pits_raw = safe_get_json(f"https://api.openf1.org/v1/pit?session_key={target_key}")
-radios_raw = safe_get_json(f"https://api.openf1.org/v1/team_radio?session_key={target_key}")
-location_raw = safe_get_json(f"https://api.openf1.org/v1/location?session_key={target_key}")
-
-driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
-team_map = {d.get('driver_number'): d.get('team_name', '-') for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
-
-# --- Stav trati ---
-status_code = 1
-if status_raw and len(status_raw) > 0:
-    last_item = status_raw[-1]
-    if isinstance(last_item, dict):
-        status_code = last_item.get("status_code", 1)
-
-status_mapping = {
-    1: ("🟢 TRAŤ ČISTÁ / GREEN FLAG", "status-green"),
-    2: ("⚠️ 🟨 DOUBLE YELLOW FLAG / ŽLUTÁ VLAJKA 🟨 ⚠️", "status-yellow"),
-    3: ("⚠️ 🟨 DOUBLE YELLOW FLAG / ŽLUTÁ VLAJKA 🟨 ⚠️", "status-yellow"),
-    4: ("🚨 SAFETY CAR (SC) ON TRACK 🚨", "status-sc"),
-    5: ("🚩 ČERVENÁ VLAJKA / RED FLAG 🚩", "status-red"),
-    6: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
-    7: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
-}
-status_text, status_class = status_mapping.get(int(status_code), ("🟢 TRAŤ OTEVŘENA", "status-green"))
-st.markdown(f'<div class="track-status-box {status_class}">{status_text}</div>', unsafe_allow_html=True)
-
-# Stinty a Pit stopy
-current_stints_map = {}
-if stints_raw:
-    df_stints = pd.DataFrame(stints_raw)
-    if not df_stints.empty and 'driver_number' in df_stints.columns:
-        sort_cols = [c for c in ['stint'] if c in df_stints.columns]
-        latest_stints = df_stints.sort_values(sort_cols).groupby('driver_number').last().reset_index() if sort_cols else df_stints.groupby('driver_number').last().reset_index()
-        for _, st_row in latest_stints.iterrows():
-            d_num = st_row['driver_number']
-            comp = str(st_row.get('compound', 'UNKNOWN')).upper()
-            tyre_icon = "🔴" if "SOFT" in comp else ("🟡" if "MEDIUM" in comp else ("⚪" if "HARD" in comp else ("🟢" if "INTER" in comp else ("🔵" if "WET" in comp else "🔘"))))
-            current_stints_map[d_num] = {
-                "compound_str": f"{tyre_icon} {comp}",
-                "stint_num": f"S{st_row.get('stint', 1)}",
-                "lap_start": st_row.get('lap_start', 1)
-            }
-
-pit_drivers = set()
-if pits_raw:
-    df_pits = pd.DataFrame(pits_raw)
-    if not df_pits.empty and 'driver_number' in df_pits.columns:
-        latest_pits = df_pits.groupby('driver_number').last().reset_index()
-        for _, p_row in latest_pits.iterrows():
-            pit_drivers.add(p_row['driver_number'])
-
-# --- 4. Záložky Aplikace ---
-tab_timing, tab_cockpit, tab_map, tab_stints, tab_radio = st.tabs(["📊 Live Timing & Box", "🏎️ Kokpit Telemetrie", "🗺️ Mapa okruhu", "🛞 Stinty", "📻 Radio"])
-
+# Pomocná funkce pro formátování sekund na m:ss.ms
 def fmt_time(seconds):
     if pd.isna(seconds) or seconds is None:
         return "-"
@@ -174,203 +66,68 @@ def fmt_time(seconds):
     except Exception:
         return "-"
 
-with tab_timing:
-    if not driver_map:
-        st.error("❌ Nepodařilo se připojit k OpenF1 API serveru. Zkuste obnovit stránku za chvíli.")
-    else:
-        df_laps = pd.DataFrame(laps_raw) if laps_raw else pd.DataFrame()
-        
-        best_s1 = df_laps['duration_sector_1'].min() if not df_laps.empty and 'duration_sector_1' in df_laps else None
-        best_s2 = df_laps['duration_sector_2'].min() if not df_laps.empty and 'duration_sector_2' in df_laps else None
-        best_s3 = df_laps['duration_sector_3'].min() if not df_laps.empty and 'duration_sector_3' in df_laps else None
-        best_lap = df_laps['lap_duration'].min() if not df_laps.empty and 'lap_duration' in df_laps else None
+# --- Vykreslení tabulky časů ---
+if not drivers_raw:
+    st.info("⌛ Čekám na data z trati...")
+else:
+    driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
+    team_map = {d.get('driver_number'): d.get('team_name', '-') for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 
-        table_rows = []
-        for d_num, d_acronym in driver_map.items():
-            driver_laps = df_laps[df_laps['driver_number'] == d_num] if not df_laps.empty and 'driver_number' in df_laps else pd.DataFrame()
-            
-            s1, s2, s3, lap_t = None, None, None, None
-            current_lap = 0
-            is_pit_out = False
-            
-            if not driver_laps.empty:
-                last_lap_row = driver_laps.sort_values('lap_number').iloc[-1]
-                s1 = last_lap_row.get('duration_sector_1')
-                s2 = last_lap_row.get('duration_sector_2')
-                s3 = last_lap_row.get('duration_sector_3')
-                lap_t = last_lap_row.get('lap_duration')
-                current_lap = int(last_lap_row.get('lap_number')) if pd.notna(last_lap_row.get('lap_number')) else 0
-                is_pit_out = last_lap_row.get('is_pit_out_lap', False)
+    df_laps = pd.DataFrame(laps_raw) if laps_raw else pd.DataFrame()
 
-            if is_pit_out:
-                track_status = "🟡 OUT LAP"
-            elif d_num in pit_drivers and pd.isna(lap_t):
-                track_status = "🔧 IN PIT"
-            else:
-                track_status = "🏎️ TRAŤ"
+    # Nejlepší absolutní časy pro fialové zvýraznění
+    best_s1 = df_laps['duration_sector_1'].min() if not df_laps.empty and 'duration_sector_1' in df_laps else None
+    best_s2 = df_laps['duration_sector_2'].min() if not df_laps.empty and 'duration_sector_2' in df_laps else None
+    best_s3 = df_laps['duration_sector_3'].min() if not df_laps.empty and 'duration_sector_3' in df_laps else None
+    best_lap = df_laps['lap_duration'].min() if not df_laps.empty and 'lap_duration' in df_laps else None
 
-            stint_info = current_stints_map.get(d_num, {})
-            tyre_str = stint_info.get("compound_str", "🔘 UNKNOWN")
-            stint_nr = stint_info.get("stint_num", "S1")
-            l_start = stint_info.get("lap_start", 1)
-            tyre_age = max(1, current_lap - l_start + 1) if current_lap >= l_start and current_lap > 0 else "-"
+    rows = []
+    for d_num, d_acronym in driver_map.items():
+        driver_laps = df_laps[df_laps['driver_number'] == d_num] if not df_laps.empty and 'driver_number' in df_laps else pd.DataFrame()
 
-            table_rows.append({
-                "num": d_num,
-                "Jezdec": d_acronym,
-                "Tým": team_map.get(d_num, "-"),
-                "Stav": track_status,
-                "Pneu": tyre_str,
-                "Stint": stint_nr,
-                "Stáří pneu": f"{tyre_age} kol" if isinstance(tyre_age, int) else "-",
-                "Kolo": current_lap if current_lap > 0 else "-",
-                "Sektor 1": fmt_time(s1),
-                "Sektor 2": fmt_time(s2),
-                "Sektor 3": fmt_time(s3),
-                "Čas kola": fmt_time(lap_t),
-                "lap_t_val": lap_t if pd.notna(lap_t) else 9999,
-                "_b_s1": abs(s1 - best_s1) < 0.001 if (pd.notna(s1) and best_s1 and isinstance(s1, (int, float))) else False,
-                "_b_s2": abs(s2 - best_s2) < 0.001 if (pd.notna(s2) and best_s2 and isinstance(s2, (int, float))) else False,
-                "_b_s3": abs(s3 - best_s3) < 0.001 if (pd.notna(s3) and best_s3 and isinstance(s3, (int, float))) else False,
-                "_b_lap": abs(lap_t - best_lap) < 0.001 if (pd.notna(lap_t) and best_lap and isinstance(lap_t, (int, float))) else False,
-            })
+        s1, s2, s3, lap_t = None, None, None, None
+        current_lap = 0
 
-        df_final = pd.DataFrame(table_rows)
-        if not df_final.empty:
-            df_final = df_final.sort_values('lap_t_val').reset_index(drop=True)
-            df_final['Pozice'] = [f"P{i+1}" for i in range(len(df_final))]
+        if not driver_laps.empty:
+            last_lap = driver_laps.sort_values('lap_number').iloc[-1]
+            s1 = last_lap.get('duration_sector_1')
+            s2 = last_lap.get('duration_sector_2')
+            s3 = last_lap.get('duration_sector_3')
+            lap_t = last_lap.get('lap_duration')
+            current_lap = int(last_lap.get('lap_number')) if pd.notna(last_lap.get('lap_number')) else 0
 
-            def highlight_bests(row):
-                styles = [''] * len(row)
-                purple_style = 'background-color: #8A2BE2; color: #FFFFFF; font-weight: bold;'
-                if row.get('_b_s1'): styles[9] = purple_style
-                if row.get('_b_s2'): styles[10] = purple_style
-                if row.get('_b_s3'): styles[11] = purple_style
-                if row.get('_b_lap'): styles[12] = purple_style
-                return styles
+        rows.append({
+            "Jezdec": d_acronym,
+            "Tým": team_map.get(d_num, "-"),
+            "Kolo": current_lap if current_lap > 0 else "-",
+            "Sektor 1": fmt_time(s1),
+            "Sektor 2": fmt_time(s2),
+            "Sektor 3": fmt_time(s3),
+            "Čas kola": fmt_time(lap_t),
+            "lap_t_val": lap_t if pd.notna(lap_t) else 9999,
+            "_b_s1": abs(s1 - best_s1) < 0.001 if (pd.notna(s1) and best_s1 and isinstance(s1, (int, float))) else False,
+            "_b_s2": abs(s2 - best_s2) < 0.001 if (pd.notna(s2) and best_s2 and isinstance(s2, (int, float))) else False,
+            "_b_s3": abs(s3 - best_s3) < 0.001 if (pd.notna(s3) and best_s3 and isinstance(s3, (int, float))) else False,
+            "_b_lap": abs(lap_t - best_lap) < 0.001 if (pd.notna(lap_t) and best_lap and isinstance(lap_t, (int, float))) else False,
+        })
 
-            display_cols = ["Pozice", "Jezdec", "Tým", "Stav", "Pneu", "Stint", "Stáří pneu", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
-            styled_table = df_final.style.apply(highlight_bests, axis=1)
+    df_final = pd.DataFrame(rows)
+    if not df_final.empty:
+        # Seřazení podle času
+        df_final = df_final.sort_values('lap_t_val').reset_index(drop=True)
+        df_final.insert(0, 'Pozice', [f"P{i+1}" for i in range(len(df_final))])
 
-            st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=680, hide_index=True)
+        # Fialové zvýraznění nejlepších časů
+        def highlight_bests(row):
+            styles = [''] * len(row)
+            purple = 'background-color: #8A2BE2; color: #FFFFFF; font-weight: bold;'
+            if row.get('_b_s1'): styles[5] = purple
+            if row.get('_b_s2'): styles[6] = purple
+            if row.get('_b_s3'): styles[7] = purple
+            if row.get('_b_lap'): styles[8] = purple
+            return styles
 
-with tab_cockpit:
-    st.subheader("🏎️ Živá Telemetrie z Kokpitu Vozu")
-    driver_options = {f"{acronym} ({team_map.get(num, '-')})": num for num, acronym in driver_map.items()}
-    if driver_options:
-        selected_label_cockpit = st.selectbox("Vyber jezdce pro sledování kokpitu:", list(driver_options.keys()))
-        selected_driver_num = driver_options[selected_label_cockpit]
-        
-        car_data_raw = safe_get_json(f"https://api.openf1.org/v1/car_data?session_key={target_key}&driver_number={selected_driver_num}")
-        
-        if car_data_raw and len(car_data_raw) > 0:
-            latest_telemetry = car_data_raw[-1]
-            speed = latest_telemetry.get('speed', 0)
-            rpm = latest_telemetry.get('rpm', 0)
-            gear = latest_telemetry.get('n_gear', 0)
-            throttle = latest_telemetry.get('throttle', 0)
-            brake = latest_telemetry.get('brake', 0)
-            drs_code = latest_telemetry.get('drs', 0)
-            
-            is_drs_open = drs_code >= 10 or drs_code in [8, 10, 12, 14]
-            drs_html = '<div class="drs-open">🟢 DRS OTEVŘENO (OPEN)</div>' if is_drs_open else '<div class="drs-closed">🔴 DRS ZAVŘENO (CLOSED)</div>'
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.markdown(f'<div class="telemetry-card"><div style="color:#8E8E93;">RYCHLOST</div><div class="telemetry-val">{speed} <span style="font-size:16px;">km/h</span></div></div>', unsafe_allow_html=True)
-            with c2:
-                st.markdown(f'<div class="telemetry-card"><div style="color:#8E8E93;">STAV DRS</div><div style="margin-top:10px;">{drs_html}</div></div>', unsafe_allow_html=True)
-            with c3:
-                st.markdown(f'<div class="telemetry-card"><div style="color:#8E8E93;">STUPEŇ / GEAR</div><div class="telemetry-val">{gear if gear > 0 else "N"}</div></div>', unsafe_allow_html=True)
-            with c4:
-                st.markdown(f'<div class="telemetry-card"><div style="color:#8E8E93;">OTÁČKY (RPM)</div><div class="telemetry-val">{rpm}</div></div>', unsafe_allow_html=True)
-            
-            st.divider()
-            st.write("**📱 Pedály (Plyn / Brzda):**")
-            col_th, col_br = st.columns(2)
-            with col_th:
-                st.write(f"🟢 Plyn: **{throttle}%**")
-                st.progress(min(100, max(0, int(throttle))))
-            with col_br:
-                st.write(f"🔴 Brzda: **{brake}%**")
-                st.progress(min(100, max(0, int(brake))))
-        else:
-            st.info("⌛ Telemetrická data pro vybraného jezdce nejsou k dispozici.")
+        display_cols = ["Pozice", "Jezdec", "Tým", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
+        styled = df_final.style.apply(highlight_bests, axis=1)
 
-with tab_map:
-    st.subheader("🗺️ Živá mapa okruhu a pozice vozů")
-    if not location_raw:
-        st.info("⌛ GPS telemetrie vozů není pro tuto relaci k dispozici.")
-    else:
-        df_loc = pd.DataFrame(location_raw)
-        if not df_loc.empty and 'x' in df_loc.columns and 'y' in df_loc.columns and 'driver_number' in df_loc.columns:
-            latest_pos = df_loc.groupby('driver_number').last().reset_index()
-            latest_pos['Jezdec'] = latest_pos['driver_number'].map(driver_map)
-            
-            st.scatter_chart(
-                latest_pos,
-                x='x',
-                y='y',
-                color='Jezdec',
-                size=200,
-                height=600,
-                use_container_width=True
-            )
-
-with tab_stints:
-    st.subheader("🛞 Přehled všech Stintů a Strategií")
-    if not stints_raw:
-        st.info("ℹ️ Pro tuto relaci nejsou k dispozici žádná data o stintování.")
-    else:
-        df_all_stints = pd.DataFrame(stints_raw)
-        if not df_all_stints.empty and 'driver_number' in df_all_stints.columns:
-            stint_rows = []
-            sort_cols = [c for c in ['driver_number', 'stint'] if c in df_all_stints.columns]
-            df_sorted = df_all_stints.sort_values(sort_cols) if sort_cols else df_all_stints
-            
-            for _, r in df_sorted.iterrows():
-                num = r.get('driver_number')
-                comp = str(r.get('compound', 'UNKNOWN')).upper()
-                tyre_icon = "🔴" if "SOFT" in comp else ("🟡" if "MEDIUM" in comp else ("⚪" if "HARD" in comp else ("🟢" if "INTER" in comp else ("🔵" if "WET" in comp else "🔘"))))
-                l_start = int(r.get('lap_start', 1)) if pd.notna(r.get('lap_start')) else 1
-                l_end = int(r.get('lap_end', 1)) if pd.notna(r.get('lap_end')) else l_start
-
-                stint_rows.append({
-                    "Jezdec": driver_map.get(num, f"#{num}"),
-                    "Tým": team_map.get(num, "-"),
-                    "Stint": f"Stint {r.get('stint', 1)}",
-                    "Směs pneu": f"{tyre_icon} {comp}",
-                    "Od kola": l_start,
-                    "Do kola": l_end,
-                    "Počet kol": max(1, l_end - l_start + 1)
-                })
-            
-            st.dataframe(pd.DataFrame(stint_rows), use_container_width=True, height=650, hide_index=True)
-
-with tab_radio:
-    st.subheader("📻 Kompletní Stream Týmových Rádií (Live Feed)")
-    if not radios_raw:
-        st.info("🎙️ Žádné audio nahrávky z rádií nejsou pro tuto relaci k dispozici.")
-    else:
-        df_radio = pd.DataFrame(radios_raw)
-        if not df_radio.empty and 'date' in df_radio.columns:
-            df_radio_sorted = df_radio.sort_values('date', ascending=False)
-            st.caption(f"Celkem načteno **{len(df_radio_sorted)}** zpráv z traťového vysílání:")
-            for _, r in df_radio_sorted.iterrows():
-                num = r.get('driver_number')
-                d_acronym = driver_map.get(num, f"#{num}")
-                t_name = team_map.get(num, "Tým")
-                audio_url = r.get('recording_url')
-                raw_date = str(r.get('date', ''))
-                formatted_time = raw_date[:19].replace('T', ' ') if 'T' in raw_date else raw_date
-                
-                col_l, col_r = st.columns([1, 3])
-                with col_l:
-                    st.markdown(f"### 🎧 {d_acronym}")
-                    st.caption(f"**{t_name}** | {formatted_time}")
-                with col_r:
-                    if audio_url:
-                        st.audio(audio_url)
-                    else:
-                        st.caption("Audio nedostupné")
-                st.divider()
+        st.dataframe(styled, column_order=display_cols, use_container_width=True, height=750, hide_index=True)
