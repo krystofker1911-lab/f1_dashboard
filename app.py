@@ -6,9 +6,8 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. Nastavení aplikace ---
 st.set_page_config(page_title="F1 Pit Wall Timing", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=3000, key="f1_live_refresh")
 
-# Vlastní CSS styly pre F1 Pit Wall
+# Vlastní CSS styly pro F1 Pit Wall
 st.markdown("""
     <style>
         .stApp { background-color: #0E0E12; color: #FFFFFF; }
@@ -55,7 +54,7 @@ def safe_get_json(url):
     except Exception:
         return []
 
-# --- 2. Kontrola kalendáře a odpočet ---
+# --- 2. Kontrola kalendáře a relace ---
 now_utc = datetime.now(timezone.utc)
 year = now_utc.year
 all_sessions = safe_get_json(f"https://api.openf1.org/v1/sessions?year={year}")
@@ -85,17 +84,20 @@ if all_sessions:
         except Exception:
             continue
 
-# Určení session key
+# AUTO-REFRESH SPUŠTĚN POUZE POKUD JE RELACE AKTIVNÍ (LIVE)
+if active_session:
+    st_autorefresh(interval=3000, key="f1_live_refresh")
+
 if active_session:
     session_key = active_session.get("session_key", "latest")
     session_title = f"🔴 LIVE TIMING — {active_session.get('location', '')} ({active_session.get('session_name', '')})"
 else:
     session_key = "latest"
-    session_title = "🏎️ FORMULA 1 — PIT WALL DASHBOARD"
+    session_title = "🏎️ FORMULA 1 — VÝSLEDKY POSLEDNÍ RELACE"
 
 st.markdown(f'<div class="session-header">{session_title}</div>', unsafe_allow_html=True)
 
-# --- 3. Zobrazení stavu trati & Odpočtu ---
+# --- 3. Načtení dat a stavu ---
 drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={session_key}")
 status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={session_key}")
 laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={session_key}")
@@ -143,7 +145,7 @@ else:
             st.markdown('<div class="countdown-box">⏱️ Čekám na další relaci F1...</div>', unsafe_allow_html=True)
 
 if not laps_raw:
-    st.info("⌛ Čekám na živá data z trati...")
+    st.info("⌛ Čekám na data z trati...")
     st.stop()
 
 # --- 4. Zpracování časů a tabulky ---
