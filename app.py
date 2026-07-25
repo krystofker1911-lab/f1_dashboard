@@ -1,12 +1,13 @@
 import streamlit as st
 import requests
 import pandas as pd
+from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. Nastavení aplikace ---
 st.set_page_config(page_title="F1 Pro Pit Wall", layout="wide", initial_sidebar_state="expanded")
 
-# Obnovování každých 5 sekund (šetrné k API)
+# Obnovování každých 5 sekund
 st_autorefresh(interval=5000, key="f1_refresh")
 
 st.markdown("""
@@ -37,21 +38,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Pomocná funkce pro bezpečné stahování z OpenF1 API
-@st.cache_data(ttl=4)
+# Stahování seznamu relací s dlouhou pamětí (300 s), aby se menu načetlo okamžitě
+@st.cache_data(ttl=300)
+def fetch_sessions_list():
+    current_yr = datetime.now().year
+    for yr in [current_yr, current_yr - 1, 2024]:
+        url = f"https://api.openf1.org/v1/sessions?year={yr}"
+        try:
+            res = requests.get(url, headers={'User-Agent': 'F1PitWall/1.0'}, timeout=5)
+            if res.status_code == 200 and isinstance(res.json(), list) and len(res.json()) > 0:
+                return res.json()
+        except Exception:
+            pass
+    return []
+
+# Stahování živých dat (krátká paměť 3 s)
+@st.cache_data(ttl=3)
 def fetch_openf1(endpoint, params=None):
     url = f"https://api.openf1.org/v1/{endpoint}"
     try:
-        res = requests.get(url, params=params, headers={'User-Agent': 'F1PitWall/1.0'}, timeout=6)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list):
-                return data
+        res = requests.get(url, params=params, headers={'User-Agent': 'F1PitWall/1.0'}, timeout=4)
+        if res.status_code == 200 and isinstance(res.json(), list):
+            return res.json()
         return []
     except Exception:
         return []
 
-# Formátování sekund na mm:ss.ms
+# Formátování času
 def fmt_time(seconds):
     if pd.isna(seconds) or seconds is None:
         return "-"
@@ -63,12 +76,13 @@ def fmt_time(seconds):
     except Exception:
         return "-"
 
-# --- 2. Správné načtení seznamu relací ---
-sessions_raw = fetch_openf1("sessions")
+# --- 2. Zobrazení postranního menu ---
+st.sidebar.title("🏎️ F1 Pit Wall")
 
+sessions_raw = fetch_sessions_list()
 session_options = {}
+
 if sessions_raw:
-    # Seřadíme od nejnovější relace
     for s in reversed(sessions_raw):
         sk = str(s.get("session_key"))
         loc = s.get('location', 'F1 GP')
@@ -77,20 +91,30 @@ if sessions_raw:
         label = f"{loc} — {s_name} ({yr})"
         session_options[label] = sk
 
-st.sidebar.title("🏎️ F1 Pit Wall")
+# POJISTKA: Menu už nikdy nezůstane prázdné
+if not session_options:
+    session_options["🔴 Živý přenos (latest)"] = "latest"
 
-if session_options:
-    selected_label = st.sidebar.selectbox("Vyber relaci ze seznamu:", list(session_options.keys()), index=0)
-    session_key = session_options[selected_label]
-else:
-    session_key = "latest"
-    selected_label = "Nejnovější relace"
+selected_label = st.sidebar.selectbox("Vyber relaci ze seznamu:", list(session_options.keys()), index=0)
+session_key = session_options[selected_label]
 
 st.markdown(f'<div class="session-header">🔴 {selected_label}</div>', unsafe_allow_html=True)
 
-# --- 3. Načtení dat pro zvolenou relaci ---
+# --- 3. Načtení dat trati ---
 drivers_raw = fetch_openf1("drivers", {"session_key": session_key})
 laps_raw = fetch_openf1("laps", {"session_key": session_key})
+
+# Fallback: Pokud vybraná relace nemá jezdce, načteme poslední relaci s daty
+if not drivers_raw and sessions_raw:
+    for s in reversed(sessions_raw):
+        sk = str(s.get("session_key"))
+        test_d = fetch_openf1("drivers", {"session_key": sk})
+        if test_d:
+            session_key = sk
+            drivers_raw = test_d
+            laps_raw = fetch_openf1("laps", {"session_key": sk})
+            break
+
 status_raw = fetch_openf1("track_status", {"session_key": session_key})
 stints_raw = fetch_openf1("stints", {"session_key": session_key})
 pits_raw = fetch_openf1("pit", {"session_key": session_key})
@@ -146,7 +170,7 @@ tab_timing, tab_cockpit, tab_map, tab_stints, tab_radio = st.tabs(["📊 Live Ti
 
 with tab_timing:
     if not driver_map:
-        st.warning("⚠️ Nepodařilo se načíst jezdce. Vyber relaci ze seznamu v levém menu.")
+        st.info("⌛ Čekám na načtení jezdců...")
     else:
         df_laps = pd.DataFrame(laps_raw) if laps_raw else pd.DataFrame()
 
@@ -173,7 +197,6 @@ with tab_timing:
                 last_row = driver_laps.sort_values('lap_number').iloc[-1]
                 is_pit_out = last_row.get('is_pit_out_lap', False)
 
-                # Vyhledání nejlepšího dokončeného kola jezdce
                 if 'lap_duration' in driver_laps.columns:
                     valid_laps = driver_laps.dropna(subset=['lap_duration'])
                     if not valid_laps.empty:
@@ -243,7 +266,6 @@ with tab_cockpit:
         selected_label_cockpit = st.selectbox("Vyber jezdce pro sledování kokpitu:", list(driver_options.keys()))
         selected_driver_num = driver_options[selected_label_cockpit]
         
-        # Filtrujeme přímo podle čísla jezdce pro rychlou odezvu
         car_data_raw = fetch_openf1("car_data", {"session_key": session_key, "driver_number": selected_driver_num})
         
         if car_data_raw and len(car_data_raw) > 0:
