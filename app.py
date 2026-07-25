@@ -170,8 +170,9 @@ else:
 current_stints_map = {}
 if stints_raw:
     df_stints = pd.DataFrame(stints_raw)
-    if not df_stints.empty and 'driver_number' in df_stints.columns and 'stint' in df_stints.columns:
-        latest_stints = df_stints.sort_values('stint').groupby('driver_number').last().reset_index()
+    if not df_stints.empty and 'driver_number' in df_stints.columns:
+        sort_cols = [c for c in ['stint'] if c in df_stints.columns]
+        latest_stints = df_stints.sort_values(sort_cols).groupby('driver_number').last().reset_index() if sort_cols else df_stints.groupby('driver_number').last().reset_index()
         for _, st_row in latest_stints.iterrows():
             d_num = st_row['driver_number']
             comp = str(st_row.get('compound', 'UNKNOWN')).upper()
@@ -361,7 +362,10 @@ with tab_stints:
         df_all_stints = pd.DataFrame(stints_raw)
         if not df_all_stints.empty and 'driver_number' in df_all_stints.columns:
             stint_rows = []
-            for _, r in df_all_stints.sort_values(['driver_number', 'stint']).iterrows():
+            sort_cols = [c for c in ['driver_number', 'stint'] if c in df_all_stints.columns]
+            df_sorted = df_all_stints.sort_values(sort_cols) if sort_cols else df_all_stints
+            
+            for _, r in df_sorted.iterrows():
                 num = r.get('driver_number')
                 comp = str(r.get('compound', 'UNKNOWN')).upper()
                 tyre_icon = "🔴" if "SOFT" in comp else ("🟡" if "MEDIUM" in comp else ("⚪" if "HARD" in comp else ("🟢" if "INTER" in comp else ("🔵" if "WET" in comp else "🔘"))))
