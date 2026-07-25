@@ -10,7 +10,7 @@ st.set_page_config(page_title="F1 Pro Pit Wall & Cockpit", layout="wide", initia
 # Živé obnovování každé 3 sekundy
 st_autorefresh(interval=3000, key="f1_live_refresh")
 
-# Vlastní CSS styly pro F1 Pit Wall
+# Vlastní CSS styly včetně blikajících výstražných světel
 st.markdown("""
     <style>
         .stApp { background-color: #0E0E12; color: #FFFFFF; }
@@ -19,14 +19,25 @@ st.markdown("""
             color: #E10600; margin-bottom: 5px; letter-spacing: 1px;
         }
         .track-status-box {
-            padding: 10px; border-radius: 8px; text-align: center;
-            font-size: 22px; font-weight: bold; margin-bottom: 12px;
+            padding: 12px; border-radius: 8px; text-align: center;
+            font-size: 24px; font-weight: bold; margin-bottom: 12px;
             text-transform: uppercase; letter-spacing: 2px;
         }
         .status-green { background-color: #00D26A; color: #000; }
-        .status-yellow { background-color: #FFCC00; color: #000; }
+        
+        /* Blikající výstražná žlutá světla (Double Yellow / Yellow Flag) */
+        .status-yellow {
+            animation: yellow-flash 0.6s infinite;
+            border: 3px solid #FFD700;
+        }
+        @keyframes yellow-flash {
+            0% { background-color: #FFCC00; color: #000; box-shadow: 0 0 25px #FFCC00; }
+            50% { background-color: #1A1500; color: #FFCC00; box-shadow: 0 0 5px #000; }
+            100% { background-color: #FFCC00; color: #000; box-shadow: 0 0 25px #FFCC00; }
+        }
+
         .status-sc { background-color: #FF8800; color: #FFF; animation: blink 1s infinite; }
-        .status-red { background-color: #FF1801; color: #FFF; animation: blink 0.6s infinite; }
+        .status-red { background-color: #FF1801; color: #FFF; animation: blink 0.5s infinite; }
         .status-vsc { background-color: #E67E22; color: #FFF; }
         .status-closed { background-color: #1E1E26; color: #FF4444; border: 2px solid #FF4444; }
         
@@ -127,7 +138,7 @@ location_raw = safe_get_json(f"https://api.openf1.org/v1/location?session_key={s
 driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 team_map = {d.get('driver_number'): d.get('team_name', '-') for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 
-# Stav trati / Odpočet
+# Stav trati / Výstražná světla
 if active_session:
     status_code = 1
     if status_raw and len(status_raw) > 0:
@@ -137,9 +148,10 @@ if active_session:
 
     status_mapping = {
         1: ("🟢 TRAŤ ČISTÁ / GREEN FLAG", "status-green"),
-        2: ("🟡 ŽLUTÁ VLAJKA / YELLOW FLAG", "status-yellow"),
-        4: ("🚨 SAFETY CAR (SC) ON TRACK", "status-sc"),
-        5: ("🚩 ČERVENÁ VLAJKA / RED FLAG", "status-red"),
+        2: ("⚠️ 🟨 DOUBLE YELLOW FLAG / ŽLUTÁ VLAJKA 🟨 ⚠️", "status-yellow"),
+        3: ("⚠️ 🟨 DOUBLE YELLOW FLAG / ŽLUTÁ VLAJKA 🟨 ⚠️", "status-yellow"),
+        4: ("🚨 SAFETY CAR (SC) ON TRACK 🚨", "status-sc"),
+        5: ("🚩 ČERVENÁ VLAJKA / RED FLAG 🚩", "status-red"),
         6: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
         7: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
     }
