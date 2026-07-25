@@ -7,6 +7,9 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. Nastavení aplikace ---
 st.set_page_config(page_title="F1 Pit Wall Timing", layout="wide", initial_sidebar_state="collapsed")
 
+# Obnovování každé 3 sekundy (aby živě odpočítával čas i aktualizoval data)
+st_autorefresh(interval=3000, key="f1_live_refresh")
+
 # Vlastní CSS styly pro F1 Pit Wall
 st.markdown("""
     <style>
@@ -84,10 +87,6 @@ if all_sessions:
         except Exception:
             continue
 
-# AUTO-REFRESH SPUŠTĚN POUZE POKUD JE RELACE AKTIVNÍ (LIVE)
-if active_session:
-    st_autorefresh(interval=3000, key="f1_live_refresh")
-
 if active_session:
     session_key = active_session.get("session_key", "latest")
     session_title = f"🔴 LIVE TIMING — {active_session.get('location', '')} ({active_session.get('session_name', '')})"
@@ -148,7 +147,7 @@ if not laps_raw:
     st.info("⌛ Čekám na data z trati...")
     st.stop()
 
-# --- 4. Zpracování časů a tabulky ---
+# --- 4. Zpracování časů, pořadí a sektorů ---
 driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 team_map = {d.get('driver_number'): d.get('team_name', '-') for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
 
@@ -160,12 +159,18 @@ if df_laps.empty or 'lap_number' not in df_laps.columns or 'driver_number' not i
 
 df_valid = df_laps.dropna(subset=['lap_duration']) if 'lap_duration' in df_laps.columns else pd.DataFrame()
 
+# Absolutně nejrychlejší časy celkově (fialové)
 best_s1 = df_valid['duration_sector_1'].min() if not df_valid.empty and 'duration_sector_1' in df_valid else None
 best_s2 = df_valid['duration_sector_2'].min() if not df_valid.empty and 'duration_sector_2' in df_valid else None
 best_s3 = df_valid['duration_sector_3'].min() if not df_valid.empty and 'duration_sector_3' in df_valid else None
 best_lap = df_valid['lap_duration'].min() if not df_valid.empty and 'lap_duration' in df_valid else None
 
-latest_laps = df_laps.sort_values('lap_number').groupby('driver_number').last().reset_index()
+# Seřazení podle nejrychlejšího kola daného jezdce
+if not df_valid.empty:
+    best_laps_per_driver = df_valid.sort_values('lap_duration').groupby('driver_number').first().reset_index()
+    sorted_laps = best_laps_per_driver.sort_values('lap_duration').reset_index(drop=True)
+else:
+    sorted_laps = df_laps.sort_values('lap_number').groupby('driver_number').last().reset_index()
 
 def fmt_time(seconds):
     if pd.isna(seconds) or seconds is None:
@@ -179,7 +184,7 @@ def fmt_time(seconds):
         return "-"
 
 table_rows = []
-for _, row in latest_laps.iterrows():
+for idx, row in sorted_laps.iterrows():
     num = row.get('driver_number')
     s1 = row.get('duration_sector_1')
     s2 = row.get('duration_sector_2')
@@ -187,6 +192,7 @@ for _, row in latest_laps.iterrows():
     lap_t = row.get('lap_duration')
 
     table_rows.append({
+        "Pozice": f"P{idx + 1}",
         "Jezdec": driver_map.get(num, f"#{num}"),
         "Tým": team_map.get(num, "-"),
         "Kolo": int(row.get('lap_number')) if pd.notna(row.get('lap_number')) else "-",
@@ -205,13 +211,13 @@ df_final = pd.DataFrame(table_rows)
 def highlight_bests(row):
     styles = [''] * len(row)
     purple_style = 'background-color: #8A2BE2; color: #FFFFFF; font-weight: bold;'
-    if row.get('_b_s1'): styles[3] = purple_style
-    if row.get('_b_s2'): styles[4] = purple_style
-    if row.get('_b_s3'): styles[5] = purple_style
-    if row.get('_b_lap'): styles[6] = purple_style
+    if row.get('_b_s1'): styles[4] = purple_style
+    if row.get('_b_s2'): styles[5] = purple_style
+    if row.get('_b_s3'): styles[6] = purple_style
+    if row.get('_b_lap'): styles[7] = purple_style
     return styles
 
-display_cols = ["Jezdec", "Tým", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
+display_cols = ["Pozice", "Jezdec", "Tým", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
 styled_table = df_final.style.apply(highlight_bests, axis=1)
 
-st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=700, hide_index=True)
+st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=750, hide_index=True)
