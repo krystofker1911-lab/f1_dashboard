@@ -4,16 +4,20 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. Nastavení aplikace ---
-st.set_page_config(page_title="F1 Pit Wall Timing", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="F1 Pit Wall - FP2", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=3000, key="f1_live_refresh")
 
-# Vlastní CSS pro tmavý vzhled
+# Vlastní CSS pro tmavý vzhled a nadpisy
 st.markdown("""
     <style>
         .stApp { background-color: #0E0E12; color: #FFFFFF; }
+        .session-header {
+            font-size: 20px; font-weight: bold; text-align: center;
+            color: #E10600; margin-bottom: 8px; letter-spacing: 1px;
+        }
         .track-status-box {
-            padding: 14px; border-radius: 10px; text-align: center;
-            font-size: 26px; font-weight: bold; margin-bottom: 15px;
+            padding: 12px; border-radius: 10px; text-align: center;
+            font-size: 24px; font-weight: bold; margin-bottom: 15px;
             text-transform: uppercase; letter-spacing: 2px;
         }
         .status-green { background-color: #00D26A; color: #000; }
@@ -36,9 +40,21 @@ def safe_get_json(url):
     except Exception:
         return []
 
-drivers_raw = safe_get_json("https://api.openf1.org/v1/drivers?session_key=latest")
-status_raw = safe_get_json("https://api.openf1.org/v1/track_status?session_key=latest")
-laps_raw = safe_get_json("https://api.openf1.org/v1/laps?session_key=latest")
+# Zjištění klíče pro nejnovější FP2 (Practice 2)
+@st.cache_data(ttl=60)
+def get_fp2_session_key():
+    sessions = safe_get_json("https://api.openf1.org/v1/sessions?session_name=Practice+2")
+    if sessions:
+        return sessions[-1].get("session_key", "latest")
+    return "latest"
+
+session_key = get_fp2_session_key()
+
+drivers_raw = safe_get_json(f"https://api.openf1.org/v1/drivers?session_key={session_key}")
+status_raw = safe_get_json(f"https://api.openf1.org/v1/track_status?session_key={session_key}")
+laps_raw = safe_get_json(f"https://api.openf1.org/v1/laps?session_key={session_key}")
+
+st.markdown('<div class="session-header">🏎️ FORMULA 1 — SECOND PRACTICE (FP2)</div>', unsafe_allow_html=True)
 
 # Bezpečné určení stavu trati
 status_code = 1
@@ -55,12 +71,12 @@ status_mapping = {
     6: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
     7: ("⚠️ VIRTUAL SAFETY CAR (VSC)", "status-vsc"),
 }
-status_text, status_class = status_mapping.get(int(status_code), ("🏁 RELACE NEAKTIVNÍ", "status-green"))
+status_text, status_class = status_mapping.get(int(status_code), ("🏁 FP2 DOKONČEN / NEAKTIVNÍ", "status-green"))
 
 st.markdown(f'<div class="track-status-box {status_class}">{status_text}</div>', unsafe_allow_html=True)
 
 if not laps_raw:
-    st.info("⌛ Čekám na živá data z trati nebo v tomto okamžiku neběží žádná relace F1...")
+    st.info("⌛ Čekám na data z FP2 tréninku...")
     st.stop()
 
 driver_map = {d.get('driver_number'): d.get('name_acronym', f"#{d.get('driver_number')}") for d in drivers_raw if isinstance(d, dict) and 'driver_number' in d}
@@ -128,4 +144,4 @@ def highlight_bests(row):
 display_cols = ["Jezdec", "Tým", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
 styled_table = df_final.style.apply(highlight_bests, axis=1)
 
-st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=800, hide_index=True)
+st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=750, hide_index=True)
