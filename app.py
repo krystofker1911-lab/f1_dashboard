@@ -128,4 +128,4 @@ def highlight_bests(row):
 display_cols = ["Jezdec", "Tým", "Kolo", "Sektor 1", "Sektor 2", "Sektor 3", "Čas kola"]
 styled_table = df_final.style.apply(highlight_bests, axis=1)
 
-st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=800, hide_index=true)
+st.dataframe(styled_table, column_order=display_cols, use_container_width=True, height=800, hide_index=True)
